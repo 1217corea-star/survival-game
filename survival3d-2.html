@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10일간의 사투 — 3D 공포 숲 생존</title>
+<style>
+  :root{--bone:#d8d6cc;--dim:#6f7268;--blood:#b23a3a;--amber:#c9a44a;--cold:#5a9bd4;--moss:#8fd0a0;--exit:#6fe3a0}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#000;overflow:hidden;
+    font-family:"DungGeunMo","Apple SD Gothic Neo","Malgun Gothic",monospace;
+    color:var(--bone);-webkit-font-smoothing:antialiased}
+  #wrap{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+
+  #hud{position:absolute;inset:0;pointer-events:none;font-size:13px;letter-spacing:.5px}
+  .panel{position:absolute;background:rgba(10,12,10,.66);
+    border:1px solid rgba(216,214,204,.16);padding:9px 12px;backdrop-filter:blur(2px)}
+  #vitals{top:14px;left:14px;min-width:212px}
+  .barRow{display:flex;align-items:center;gap:8px;margin:4px 0}
+  .barLabel{width:36px;color:var(--dim);font-size:11px}
+  .barTrack{flex:1;height:10px;background:#1c211b;border:1px solid #2a302a;position:relative;overflow:hidden}
+  .barFill{position:absolute;inset:0;width:100%;transform-origin:left;transition:transform .12s linear}
+  #hpFill{background:linear-gradient(90deg,#7a2222,var(--blood))}
+  #hungerFill{background:linear-gradient(90deg,#7a6320,var(--amber))}
+  #stamFill{background:linear-gradient(90deg,#2c4f70,var(--cold))}
+  .barNum{width:34px;text-align:right;font-size:11px}
+
+  #clock{top:14px;right:14px;text-align:right;min-width:150px}
+  #dayTxt{font-size:20px;letter-spacing:2px}
+  #phaseTxt{font-size:12px;color:var(--dim);margin-top:2px}
+  #timerTxt{font-size:13px;color:var(--amber);margin-top:3px}
+  #viewTxt{font-size:11px;color:var(--cold);margin-top:4px}
+  .nightOn #phaseTxt{color:#8d6fc0}
+
+  #mission{bottom:14px;left:50%;transform:translateX(-50%);text-align:center;max-width:560px}
+  #missionLabel{font-size:10px;color:var(--dim);letter-spacing:3px}
+  #missionTxt{font-size:14px;margin-top:3px}
+  #missionTxt b{color:var(--moss)} #missionTxt.done{color:var(--exit)}
+
+  #gear{bottom:14px;left:14px;min-width:200px;font-size:12px}
+  #gear .ttl{font-size:10px;color:var(--dim);letter-spacing:2px;margin-bottom:5px}
+  .slot{display:flex;justify-content:space-between;padding:1px 0;color:var(--dim)}
+  .slot.has{color:var(--bone)} .slot.cur{color:var(--moss)}
+  .slot.cur::before{content:"▸ ";color:var(--moss)}
+  #armorTag{color:var(--cold)}
+
+  #log{position:absolute;bottom:14px;right:14px;width:240px;text-align:right;font-size:11px;line-height:1.5;color:var(--dim)}
+  #log div{opacity:0;animation:fade 4.6s forwards}
+  @keyframes fade{0%{opacity:0}8%{opacity:1}80%{opacity:1}100%{opacity:0}}
+
+  #cross{position:absolute;top:50%;left:50%;width:18px;height:18px;
+    transform:translate(-50%,-50%);pointer-events:none;opacity:.8}
+  #cross::before,#cross::after{content:"";position:absolute;background:rgba(216,214,204,.8)}
+  #cross::before{left:8px;top:0;width:2px;height:18px}
+  #cross::after{top:8px;left:0;height:2px;width:18px}
+
+  #dmgFlash{position:absolute;inset:0;pointer-events:none;opacity:0;
+    background:radial-gradient(circle,transparent 38%,rgba(178,58,58,.55));transition:opacity .08s}
+
+  .screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;gap:14px;pointer-events:auto;
+    background:radial-gradient(circle at 50% 35%,rgba(18,22,16,.9),rgba(0,0,0,.97))}
+  .screen.hidden{display:none}
+  .screen h1{font-size:clamp(30px,6vw,58px);letter-spacing:4px;font-weight:900;text-shadow:0 0 24px rgba(178,58,58,.4)}
+  .screen .sub{color:var(--dim);font-size:14px;max-width:540px;line-height:1.8}
+  .screen .sub b{color:var(--moss)}
+  .keys{display:grid;grid-template-columns:auto auto;gap:4px 22px;font-size:12.5px;margin-top:6px}
+  .keys span:nth-child(odd){color:var(--amber);text-align:right}
+  .btn{margin-top:10px;cursor:pointer;background:transparent;border:1px solid var(--moss);color:var(--moss);
+    font-family:inherit;font-size:15px;letter-spacing:3px;padding:11px 34px;transition:.18s}
+  .btn:hover{background:var(--moss);color:#0a0c0a}
+  #overTitle.lose{color:var(--blood)} #overTitle.win{color:var(--exit)}
+  #pause{background:rgba(0,0,0,.6)}
+  .hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-size:10px;color:#3f423c;letter-spacing:2px}
+  #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;color:var(--dim);font-size:13px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+
+  <div id="hud">
+    <div class="panel" id="vitals">
+      <div class="barRow"><span class="barLabel">HP</span><div class="barTrack"><div class="barFill" id="hpFill"></div></div><span class="barNum" id="hpNum">100</span></div>
+      <div class="barRow"><span class="barLabel">배고픔</span><div class="barTrack"><div class="barFill" id="hungerFill"></div></div><span class="barNum" id="hungerNum">100</span></div>
+      <div class="barRow"><span class="barLabel">기력</span><div class="barTrack"><div class="barFill" id="stamFill"></div></div><span class="barNum" id="stamNum">100</span></div>
+      <div id="starveWarn" style="display:none;color:var(--blood);font-size:11px;margin-top:4px"></div>
+    </div>
+    <div class="panel" id="clock">
+      <div id="dayTxt">DAY 1 / 10</div>
+      <div id="phaseTxt">낮</div>
+      <div id="timerTxt">60.0s</div>
+      <div id="viewTxt">[V] 3인칭</div>
+    </div>
+    <div class="panel" id="gear">
+      <div class="ttl">장비 · INVENTORY</div>
+      <div id="gearList"></div>
+      <div id="armorTag" style="margin-top:5px;display:none">🛡 갑옷 착용 (피해 -15)</div>
+    </div>
+    <div class="panel" id="mission">
+      <div id="missionLabel">임무 · OBJECTIVE</div>
+      <div id="missionTxt">—</div>
+    </div>
+    <div id="log"></div>
+    <div id="cross"></div>
+    <div id="dmgFlash"></div>
+  </div>
+
+  <div class="screen" id="startScreen">
+    <h1>10일간의 사투</h1>
+    <div class="sub">광활한 숲과 수많은 건물. <b>10일</b> 안에 임무를 끝내고
+      활성화된 <b>EXIT</b>로 탈출하라.<br>밤이 오면 맹수가 깨어나고, 숲 어딘가엔 <b>삼각머리 괴물 3마리</b>가 배회한다.</div>
+    <div class="keys">
+      <span>이동</span><span>W A S D</span>
+      <span>달리기</span><span>Shift (배고픔 가속)</span>
+      <span>시점 둘러보기</span><span>마우스</span>
+      <span>시점 회전(대체)</span><span>방향키 ← → ↑ ↓</span>
+      <span>공격 / 발사</span><span>좌클릭 또는 Space</span>
+      <span>수색·줍기·먹기·탈출</span><span>E</span>
+      <span>무기 교체</span><span>1·2·3·4·5</span>
+      <span>1인칭 ↔ 3인칭</span><span>V</span>
+      <span>일시정지</span><span>P</span>
+    </div>
+    <button class="btn" id="startBtn">생 존 시 작</button>
+    <div class="hint">마우스가 잠기는 환경이면 화면 클릭으로 부드럽게 조준됩니다 · 잠기지 않아도 방향키로 시점 회전 가능</div>
+  </div>
+
+  <div class="screen hidden" id="pause">
+    <h1 style="font-size:34px">일시정지</h1>
+    <div class="sub">화면을 클릭하면 계속됩니다.</div>
+  </div>
+
+  <div class="screen hidden" id="overScreen">
+    <h1 id="overTitle">—</h1>
+    <div class="sub" id="overSub"></div>
+    <button class="btn" id="retryBtn">다 시 시 도</button>
+  </div>
+
+  <div id="loading">3D 엔진 로딩 중…</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+"use strict";
+/* ════════════════════════════════════════════════════════════
+   10일간의 사투 — 3D 공포 숲 생존 (Three.js / 단일 HTML)
+   ════════════════════════════════════════════════════════════ */
+if(!window.THREE){
+  document.getElementById('loading').textContent='3D 엔진 로드 실패 — 네트워크를 확인하세요.';
+}else{
+  document.getElementById('loading').style.display='none';
+  boot();
+}
+
+function boot(){
+const cv=document.getElementById('cv');
+
+/* ── 설정/상수 ── */
+const MAP=200;                       // 맵 반경 (전체 400x400)
+const PHASE={DAY:60,NIGHT:90}, MAX_DAY=10, STARVE_LIMIT=30;
+const EYE=1.7;                        // 1인칭 눈높이
+const MAXHP=150;                      // 플레이어 최대 체력
+const HUNGER_NORMAL=1/5;              // 5초마다 1 감소
+const HUNGER_RUN=1/3;                 // 달리기 시 3초마다 1 감소
+const BEAST_ATK_CD=2.0;              // 동물 공격 딜레이 2000ms
+
+const WEAPONS={
+  fist :{name:'맨손',dmg:8 ,cd:1.0,ranged:false,key:'1'},
+  axe  :{name:'도끼',dmg:15,cd:1.0,ranged:false,key:'2',drop:0.55},
+  knife:{name:'칼'  ,dmg:25,cd:1.0,ranged:false,key:'3',drop:0.35},
+  spear:{name:'창'  ,dmg:45,cd:1.0,ranged:false,key:'4',drop:0.15},
+  gun  :{name:'총'  ,dmg:30,cd:1.0,ranged:true ,key:'5',drop:0.10},
+};
+const ORDER=['fist','axe','knife','spear','gun'];
+const BEASTS={
+  wolf :{name:'늑대' ,hp:100,atk:10,spd:9 ,r:1.2,color:0x8a8f86,h:1.4},
+  bear :{name:'곰'   ,hp:125,atk:25,spd:6 ,r:1.6,color:0x6b5640,h:1.8},
+  tiger:{name:'호랑이',hp:150,atk:40,spd:11,r:1.4,color:0xc08a3a,h:1.5},
+};
+const ARMOR_REDUCE=15;
+
+/* ── three 기본 ── */
+let scene,camera,renderer;
+let ambient,hemi,sun,flashlight,flashTarget;
+let groundMat;
+let G=null,last=0,running=false,locked=false,view=3,paused=false;
+let yaw=0,pitch=0,lastMX=null,lastMY=null;
+const keys={},mouse={down:false};
+
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const dist2=(ax,az,bx,bz)=>Math.hypot(ax-bx,az-bz);
+
+function initThree(){
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x10130f);
+  scene.fog=new THREE.Fog(0x10130f,30,220);
+
+  camera=new THREE.PerspectiveCamera(74,1,0.1,700);
+  camera.rotation.order='YXZ';
+
+  renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+
+  ambient=new THREE.AmbientLight(0xffffff,0.55); scene.add(ambient);
+  hemi=new THREE.HemisphereLight(0x8da0b0,0x26331c,0.55); scene.add(hemi);
+  sun=new THREE.DirectionalLight(0xfff2d8,0.85); sun.position.set(80,160,60); scene.add(sun);
+
+  flashlight=new THREE.SpotLight(0xfff0c0,0.0,95,Math.PI/6,0.45,1.3);
+  flashlight.position.set(0,0,0);
+  flashTarget=new THREE.Object3D(); flashTarget.position.set(0,0,-1);
+  camera.add(flashlight); camera.add(flashTarget); flashlight.target=flashTarget;
+  scene.add(camera);
+
+  // 바닥
+  groundMat=new THREE.MeshLambertMaterial({color:0x33402f});
+  const ground=new THREE.Mesh(new THREE.PlaneGeometry(MAP*2+40,MAP*2+40),groundMat);
+  ground.rotation.x=-Math.PI/2; ground.position.y=0; scene.add(ground);
+  // 외곽 벽(어두운 안개 너머)
+  const wallMat=new THREE.MeshLambertMaterial({color:0x0c0f0a});
+  [[0,-MAP,MAP*2,1,12],[0,MAP,MAP*2,1,12],[-MAP,0,1,MAP*2,12],[MAP,0,1,MAP*2,12]]
+    .forEach(([x,z,w,d,h])=>{
+      const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),wallMat);
+      m.position.set(x,h/2,z); scene.add(m);
+    });
+  resize();
+}
+function resize(){
+  const w=window.innerWidth,h=window.innerHeight;
+  renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize',()=>{ if(renderer) resize(); });
+
+/* ── 공유 지오메트리/머티리얼 ── */
+const SHARED={};
+function shared(){
+  SHARED.trunk=new THREE.CylinderGeometry(0.45,0.65,6,6);
+  SHARED.trunkMat=new THREE.MeshLambertMaterial({color:0x3a2c1c});
+  SHARED.leaf=new THREE.ConeGeometry(3.2,7,7);
+  SHARED.leafMat=new THREE.MeshLambertMaterial({color:0x1f3318});
+  SHARED.leaf2Mat=new THREE.MeshLambertMaterial({color:0x274020});
+  SHARED.crate=new THREE.BoxGeometry(1.8,1.8,1.8);
+  SHARED.crateMat=new THREE.MeshLambertMaterial({color:0x6a542f});
+  SHARED.crateUsed=new THREE.MeshLambertMaterial({color:0x2c2418});
+  SHARED.bldgMats=[0x2b2622,0x322a24,0x261f1a,0x2e2a26].map(c=>new THREE.MeshLambertMaterial({color:c}));
+}
+
+/* ════════════════════════════════════════════════════════════
+   월드 생성
+   ════════════════════════════════════════════════════════════ */
+function buildWorld(){
+  const root=new THREE.Group(); scene.add(root); G.root=root;
+  G.buildings=[]; G.crates=[]; G.trees=[]; G.walls=[];
+
+  // 건물 (벽 + 출입구 → 안으로 진입 가능) — 다수
+  const N_BLD=30;
+  for(let i=0;i<N_BLD;i++){
+    let cx,cz,hw,hd,ok,tries=0;
+    do{
+      ok=true;
+      hw=rnd(5,11); hd=rnd(5,11);
+      cx=rnd(-MAP+20,MAP-20); cz=rnd(-MAP+20,MAP-20);
+      if(dist2(cx,cz,0,0)<28){ok=false;continue;}     // 시작 지점 비움
+      for(const b of G.buildings){
+        if(Math.abs(cx-b.cx)<hw+b.hw+8 && Math.abs(cz-b.cz)<hd+b.hd+8){ok=false;break;}
+      }
+      tries++;
+    }while(!ok&&tries<30);
+    if(!ok) continue;
+    const h=rnd(6,12);
+    const mat=SHARED.bldgMats[i%SHARED.bldgMats.length];
+    makeBuilding(cx,cz,hw,hd,h,mat);
+    G.buildings.push({cx,cz,hw,hd,minX:cx-hw,maxX:cx+hw,minZ:cz-hd,maxZ:cz+hd});
+    // 내부 보상 상자
+    const ic=new THREE.Mesh(SHARED.crate,SHARED.crateMat);
+    ic.position.set(cx,0.9,cz); ic.rotation.y=rnd(0,6.28); root.add(ic);
+    G.crates.push({x:cx,z:cz,mesh:ic,used:false});
+  }
+
+  // 상자 (수색용) — 야외 다수
+  const N_CRATE=45;
+  for(let i=0;i<N_CRATE;i++){
+    let x,z,ok,tries=0;
+    do{ ok=true; x=rnd(-MAP+10,MAP-10); z=rnd(-MAP+10,MAP-10);
+        for(const b of G.buildings) if(x>b.minX-3&&x<b.maxX+3&&z>b.minZ-3&&z<b.maxZ+3){ok=false;break;}
+        tries++;
+    }while(!ok&&tries<14);
+    const m=new THREE.Mesh(SHARED.crate,SHARED.crateMat);
+    m.position.set(x,0.9,z); m.rotation.y=rnd(0,6.28); root.add(m);
+    G.crates.push({x,z,mesh:m,used:false});
+  }
+
+  // 나무 — 매우 많이
+  const N_TREE=240;
+  for(let i=0;i<N_TREE;i++){
+    let x,z,ok,tries=0;
+    do{ ok=true; x=rnd(-MAP+6,MAP-6); z=rnd(-MAP+6,MAP-6);
+        if(dist2(x,z,0,0)<14){ok=false;continue;}
+        for(const b of G.buildings) if(x>b.minX-2&&x<b.maxX+2&&z>b.minZ-2&&z<b.maxZ+2){ok=false;break;}
+        tries++;
+    }while(!ok&&tries<10);
+    const g=new THREE.Group();
+    const t=new THREE.Mesh(SHARED.trunk,SHARED.trunkMat); t.position.y=3; g.add(t);
+    const l=new THREE.Mesh(SHARED.leaf, i%2?SHARED.leafMat:SHARED.leaf2Mat);
+    l.position.y=8; l.scale.setScalar(rnd(0.8,1.25)); g.add(l);
+    g.position.set(x,0,z); root.add(g);
+    G.trees.push(g);
+  }
+
+  // 탈출구 (반대편 구석)
+  const ex=MAP-24, ez=-(MAP-24);
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(3.4,0.5,10,28),
+    new THREE.MeshBasicMaterial({color:0x335544}));
+  ring.position.set(ex,3.4,ez); ring.rotation.x=Math.PI/2;
+  const exLight=new THREE.PointLight(0x6fe3a0,0,40);
+  exLight.position.set(ex,4,ez); root.add(ring,exLight);
+  G.exit={x:ex,z:ez,r:5,active:false,ring,light:exLight};
+}
+
+// 건물: 네 벽 + 한쪽 출입구. 벽마다 충돌 박스를 G.walls에 등록 → 문으로 진입 가능
+function makeBuilding(cx,cz,hw,hd,h,mat){
+  const t=0.7, dg=4.8;                       // 벽 두께 / 출입구 폭
+  const door=Math.floor(Math.random()*4);    // 0:북 1:남 2:서 3:동
+  const addBox=(x0,x1,z0,z1)=>{
+    const w=x1-x0, d=z1-z0;
+    if(w<=0.05||d<=0.05) return;
+    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+    m.position.set((x0+x1)/2,h/2,(z0+z1)/2); G.root.add(m);
+    G.walls.push({minX:x0,maxX:x1,minZ:z0,maxZ:z1});
+  };
+  const Nz0=cz-hd-t/2,Nz1=cz-hd+t/2, Sz0=cz+hd-t/2,Sz1=cz+hd+t/2;
+  const Wx0=cx-hw-t/2,Wx1=cx-hw+t/2, Ex0=cx+hw-t/2,Ex1=cx+hw+t/2;
+  // 북/남 벽 (x 방향)
+  if(door===0){ addBox(cx-hw,cx-dg/2,Nz0,Nz1); addBox(cx+dg/2,cx+hw,Nz0,Nz1); }
+  else addBox(cx-hw,cx+hw,Nz0,Nz1);
+  if(door===1){ addBox(cx-hw,cx-dg/2,Sz0,Sz1); addBox(cx+dg/2,cx+hw,Sz0,Sz1); }
+  else addBox(cx-hw,cx+hw,Sz0,Sz1);
+  // 서/동 벽 (z 방향)
+  if(door===2){ addBox(Wx0,Wx1,cz-hd,cz-dg/2); addBox(Wx0,Wx1,cz+dg/2,cz+hd); }
+  else addBox(Wx0,Wx1,cz-hd,cz+hd);
+  if(door===3){ addBox(Ex0,Ex1,cz-hd,cz-dg/2); addBox(Ex0,Ex1,cz+dg/2,cz+hd); }
+  else addBox(Ex0,Ex1,cz-hd,cz+hd);
+}
+
+/* ── 적 메시 ── */
+function makeBeast(kind){
+  const def=BEASTS[kind], g=new THREE.Group();
+  const mat=new THREE.MeshLambertMaterial({color:def.color});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(def.r*1.6,def.h,def.r*2.6),mat);
+  body.position.y=def.h*0.6; g.add(body);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(def.r*1.1,def.h*0.8,def.r*1.1),mat);
+  head.position.set(0,def.h*0.8,def.r*1.4); g.add(head);
+  const eMat=new THREE.MeshBasicMaterial({color:0xff5555});
+  const e1=new THREE.Mesh(new THREE.SphereGeometry(0.12,6,6),eMat);
+  e1.position.set(def.r*0.4,def.h*0.95,def.r*1.9); const e2=e1.clone(); e2.position.x=-def.r*0.4;
+  g.add(e1,e2);
+  // 다리(간단)
+  const legMat=new THREE.MeshLambertMaterial({color:0x000000});
+  [[0.6,1],[ -0.6,1],[0.6,-1],[-0.6,-1]].forEach(([lx,lz])=>{
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(0.25,def.h*0.6,0.25),legMat);
+    leg.position.set(lx*def.r*0.7,def.h*0.3,lz*def.r*0.9); g.add(leg);
+  });
+  return {g,mat};
+}
+function makeBoss(){
+  const g=new THREE.Group();
+  const dark=new THREE.MeshLambertMaterial({color:0x0d0d12});
+  const pale=new THREE.MeshLambertMaterial({color:0xcfc8b8});
+  const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.75,0.5,3.6,8),dark);
+  torso.position.y=4.4; g.add(torso);
+  const head=new THREE.Mesh(new THREE.ConeGeometry(1.0,1.6,3),dark);
+  head.position.y=6.6; g.add(head);
+  const eMat=new THREE.MeshBasicMaterial({color:0xc0392b});
+  const e1=new THREE.Mesh(new THREE.SphereGeometry(0.14,8,8),eMat);
+  e1.position.set(0.32,6.4,0.85); const e2=e1.clone(); e2.position.x=-0.32; g.add(e1,e2);
+  const limbs=[];
+  [[0.5,0.4],[-0.5,0.4],[0.5,-0.4],[-0.5,-0.4]].forEach(([lx,lz])=>{
+    const pivot=new THREE.Object3D(); pivot.position.set(lx,5.2,lz);
+    const limb=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.07,5.4,5),pale);
+    limb.position.y=-2.7; pivot.add(limb); g.add(pivot); limbs.push(pivot);
+  });
+  return {g,eMat,limbs};
+}
+
+/* ════════════════════════════════════════════════════════════
+   임무
+   ════════════════════════════════════════════════════════════ */
+function buildMissions(crateCount){
+  const lt=Math.min(10,crateCount);
+  return [
+    {type:'beastKill',target:6,prog:0,label:n=>`맹수 <b>${n}/6</b> 처치`},
+    {type:'wolfKill' ,target:4,prog:0,label:n=>`늑대 <b>${n}/4</b> 처치`},
+    {type:'foodCollect',target:5,prog:0,label:n=>`음식 <b>${n}/5</b> 수집`},
+    {type:'bossKill' ,target:1,prog:0,label:n=>`삼각머리 괴물 <b>${n}/1</b> 처치`},
+    {type:'lootSearch',target:lt,prog:0,label:n=>`상자 <b>${n}/${lt}</b> 수색`},
+  ];
+}
+
+/* ════════════════════════════════════════════════════════════
+   새 게임
+   ════════════════════════════════════════════════════════════ */
+function newGame(){
+  if(G&&G.root){ scene.remove(G.root); }
+  G={
+    player:{x:0,z:0,r:1.2,hp:MAXHP,hunger:100,stam:100,
+      owned:{fist:true},cur:'fist',ammo:0,armor:false,food:0,
+      atkTimer:0,hurt:0,starve:-1},
+    beasts:[],bosses:[],fx:[],drops:[],
+    day:1,phase:'DAY',phaseT:PHASE.DAY,spawnT:2,
+    over:false,win:false,missionDone:false,
+  };
+  yaw=Math.PI*0.25; pitch=-0.05;
+  buildWorld();
+  G.mission=buildMissions(G.crates.length)[Math.floor(Math.random()*5)];
+
+  // 플레이어 바디 메시
+  const pg=new THREE.Group();
+  const bodyMat=new THREE.MeshLambertMaterial({color:0xbfe0c2});
+  const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.6,1.8,8),bodyMat);
+  torso.position.y=1.0; pg.add(torso);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.5,10,10),bodyMat);
+  head.position.y=2.15; pg.add(head);
+  G.playerMesh=pg; G.root.add(pg);
+
+  // 보스 3
+  for(let i=0;i<3;i++){
+    const b=makeBoss();
+    let x,z;
+    do{ x=rnd(-MAP+20,MAP-20); z=rnd(-MAP+20,MAP-20); }while(dist2(x,z,0,0)<60);
+    b.g.position.set(x,0,z); G.root.add(b.g);
+    G.bosses.push({mesh:b.g,eMat:b.eMat,limbs:b.limbs,
+      x,z,hp:350,max:350,r:2.4,atk:30,state:'roam',t:rnd(1,3),tx:x,tz:z,
+      cd:rnd(2,4),limbT:Math.random()*6,hurt:0});
+  }
+  pushLog('생존 시작. 어둠이 오기 전에 준비하라.');
+}
+
+/* ════════════════════════════════════════════════════════════
+   입력
+   ════════════════════════════════════════════════════════════ */
+window.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase(); keys[k]=true;
+  if([' ','w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
+  if(!running||!G||G.over) return;
+  if(k==='p'){ togglePause(); return; }
+  if(paused) return;
+  if(e.key===' ') doAttack();
+  if(k==='e') interact();
+  if(k==='v') toggleView();
+  if('12345'.includes(e.key)) switchWeapon(e.key);
+});
+window.addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
+
+// 마우스 시점: 잠금 시 movement 델타, 비잠금 시 좌표 델타(폴백)
+document.addEventListener('mousemove',e=>{
+  if(!running||!G||G.over||paused) return;
+  const s=0.0022;
+  if(locked){ yaw-=e.movementX*s; pitch-=e.movementY*s; }
+  else if(lastMX!==null){ yaw-=(e.clientX-lastMX)*s; pitch-=(e.clientY-lastMY)*s; }
+  lastMX=e.clientX; lastMY=e.clientY;
+  pitch=clamp(pitch,-1.3,1.3);
+});
+window.addEventListener('mouseout',()=>{ lastMX=null; lastMY=null; });
+
+// 클릭은 항상 공격(잠금 가능 환경이면 잠금도 시도)
+cv.addEventListener('mousedown',()=>{
+  if(!running||!G||G.over||paused) return;
+  if(!locked){ try{ cv.requestPointerLock(); }catch(_){} }
+  doAttack();
+});
+document.addEventListener('pointerlockchange',()=>{
+  locked=(document.pointerLockElement===cv); lastMX=null; lastMY=null;
+});
+function togglePause(){
+  paused=!paused;
+  document.getElementById('pause').classList.toggle('hidden',!paused);
+  if(paused){ try{ document.exitPointerLock&&document.exitPointerLock(); }catch(_){} }
+  last=performance.now();
+}
+document.getElementById('pause').addEventListener('click',()=>{
+  if(running&&!G.over){ paused=false; document.getElementById('pause').classList.add('hidden');
+    try{ cv.requestPointerLock(); }catch(_){} }
+});
+
+function toggleView(){
+  view=(view===1)?3:1;
+  document.getElementById('viewTxt').textContent='[V] '+(view===1?'1인칭':'3인칭');
+  G.playerMesh.visible=(view===3);
+}
+function switchWeapon(k){
+  const id=ORDER.find(w=>WEAPONS[w].key===k);
+  if(id&&G.player.owned[id]){ G.player.cur=id; refreshGear(); }
+}
+
+/* ── 방향 벡터 ── */
+function fwdHoriz(){ return {x:-Math.sin(yaw),z:-Math.cos(yaw)}; }
+
+/* ════════════════════════════════════════════════════════════
+   액션
+   ════════════════════════════════════════════════════════════ */
+function nearestEnemy(reach){
+  const p=G.player; let best=null,bd=1e9;
+  const scan=arr=>{ for(const m of arr){ if(m.dead)continue;
+    const dx=m.x-p.x,dz=m.z-p.z,d=Math.hypot(dx,dz);
+    if(d<=reach+(m.r||0) && d<bd){ bd=d; best={m,arr,dx,dz,d}; } } };
+  scan(G.beasts); scan(G.bosses);
+  return best;
+}
+function doAttack(){
+  const p=G.player; if(p.atkTimer>0) return;
+  const w=WEAPONS[p.cur]; p.atkTimer=w.cd;
+
+  if(w.ranged){
+    if(p.ammo<=0){ pushLog('탄약이 없다!'); beep(120,.05); return; }
+    p.ammo--; refreshGear(); beep(720,.04);
+    // 사거리 내 가장 가까운 적으로 자동 조준
+    const tgt=nearestEnemy(95);
+    if(tgt){
+      tracer(p.x,EYE,p.z, tgt.m.x,1.2,tgt.m.z);
+      hitSpark(tgt.m.x,tgt.m.z);
+      hitEnemy(tgt.m,tgt.arr,w.dmg);
+    }else{
+      const f=fwdHoriz();
+      tracer(p.x,EYE,p.z, p.x+f.x*60,1.2,p.z+f.z*60);
+    }
+  }else{
+    beep(220,.05);
+    const reach=5.2+p.r;
+    const tgt=nearestEnemy(reach);
+    if(tgt){
+      // 공격점이 가장 가까운 적을 향함
+      const aEnemy=Math.atan2(-tgt.dx,-tgt.dz);
+      swingFX(p.x,p.z,aEnemy);
+      hitSpark(tgt.m.x,tgt.m.z);
+      const dirx=tgt.dx/tgt.d, dirz=tgt.dz/tgt.d;
+      const apply=arr=>{ for(const m of arr){ if(m.dead)continue;
+        const dx=m.x-p.x,dz=m.z-p.z,d=Math.hypot(dx,dz)||1;
+        if(d>reach+m.r)continue;
+        const dot=(dirx*dx+dirz*dz)/d;
+        if(m===tgt.m || dot>0.4) hitEnemy(m,arr,w.dmg);   // 대상 + 같은 방향 클리브
+      }};
+      apply(G.beasts); apply(G.bosses);
+    }else{
+      swingFX(p.x,p.z,yaw);
+    }
+  }
+}
+function hitEnemy(m,arr,dmg){
+  m.hp-=dmg; m.hurt=0.12;
+  if(m.hp<=0&&!m.dead){
+    m.dead=true; G.root.remove(m.mesh);
+    if(arr===G.beasts) onBeastKill(m); else onBossKill(m);
+  }
+}
+
+function interact(){
+  const p=G.player;
+  for(const c of G.crates){
+    if(!c.used && dist2(p.x,p.z,c.x,c.z)<3.6){
+      c.used=true; c.mesh.material=SHARED.crateUsed;
+      searchCrate(); missionEvent('lootSearch'); return;
+    }
+  }
+  for(const d of G.drops){
+    if(!d.gone && dist2(p.x,p.z,d.x,d.z)<3.2){ pickup(d); return; }
+  }
+  if(dist2(p.x,p.z,G.exit.x,G.exit.z)<G.exit.r+p.r){
+    if(G.exit.active) winGame();
+    else pushLog('탈출구가 잠겨 있다. 임무를 완수하라.');
+  }
+}
+function searchCrate(){
+  const p=G.player,got=[];
+  const roll=id=>{ if(Math.random()<WEAPONS[id].drop){
+    if(!p.owned[id]){p.owned[id]=true;got.push(WEAPONS[id].name);} else got.push(WEAPONS[id].name+'(중복)');
+    if(id==='gun'&&p.ammo===0)p.ammo+=20; } };
+  roll('gun');roll('spear');roll('knife');roll('axe');
+  if(Math.random()<0.35){ p.ammo+=15; got.push('탄약+15'); }
+  if(Math.random()<0.22&&!p.armor){ p.armor=true; got.push('갑옷'); }
+  if(p.cur==='fist'){ for(const id of ['spear','knife','axe']) if(p.owned[id]){p.cur=id;break;} }
+  pushLog(got.length?'수색 발견: '+got.join(', '):'수색했지만 아무것도 없다…');
+  refreshGear(); beep(520,.05);
+}
+function pickup(d){
+  const p=G.player; d.gone=true; G.root.remove(d.mesh);
+  if(d.kind==='food'){
+    p.food++; missionEvent('foodCollect'); p.hunger=clamp(p.hunger+40,0,100);
+    if(p.starve>=0){ p.starve=-1; document.getElementById('starveWarn').style.display='none'; }
+    pushLog('음식 섭취 — 배고픔 +40'); beep(620,.06);
+  }else{ p.ammo+=12; pushLog('탄약 +12'); beep(560,.04); }
+  refreshGear();
+}
+function dropItem(x,z,kind){
+  let mesh;
+  if(kind==='food'){ mesh=new THREE.Mesh(new THREE.SphereGeometry(0.45,8,8),
+    new THREE.MeshLambertMaterial({color:0xd06b3a})); }
+  else{ mesh=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.4,0.5),
+    new THREE.MeshLambertMaterial({color:0xc9c050})); }
+  mesh.position.set(x,0.5,z); G.root.add(mesh);
+  G.drops.push({x,z,kind,mesh,gone:false});
+}
+
+function onBeastKill(m){
+  pushLog(`${BEASTS[m.kind].name} 처치`); beep(160,.08);
+  dropItem(m.x,m.z,'food'); missionEvent('beastKill');
+  if(m.kind==='wolf') missionEvent('wolfKill');
+}
+function onBossKill(m){
+  pushLog('★ 삼각머리 괴물을 쓰러뜨렸다 ★'); beep(90,.25);
+  dropItem(m.x,m.z,'food'); dropItem(m.x+2,m.z,'ammo'); missionEvent('bossKill');
+}
+function missionEvent(type){
+  const m=G.mission; if(G.missionDone)return;
+  if(m.type===type){ m.prog=Math.min(m.target,m.prog+1);
+    if(m.prog>=m.target) completeMission(); refreshMission(); }
+}
+function completeMission(){
+  G.missionDone=true; G.exit.active=true;
+  G.exit.light.intensity=2.2; G.exit.ring.material.color.set(0x6fe3a0);
+  refreshMission(); pushLog('임무 완수! EXIT가 활성화되었다.'); beep(880,.18);
+}
+
+/* ── 이펙트 ── */
+function tracer(x1,y1,z1,x2,y2,z2){
+  const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x1,y1,z1),new THREE.Vector3(x2,1.2,z2)]);
+  const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xffe070}));
+  G.root.add(line); G.fx.push({mesh:line,life:0.06,geo});
+}
+function swingFX(x,z,ang){
+  const geo=new THREE.RingGeometry(3.6,4.8,16,1,-0.7,1.4);
+  const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0xd8d6cc,transparent:true,opacity:0.7,side:THREE.DoubleSide}));
+  m.position.set(x,1.2,z); m.rotation.x=-Math.PI/2; m.rotation.z=-ang;
+  G.root.add(m); G.fx.push({mesh:m,life:0.18,maxLife:0.18,base:0.7,fade:true,geo});
+}
+function hitSpark(x,z){
+  const geo=new THREE.RingGeometry(0.3,1.5,16);
+  const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.95,side:THREE.DoubleSide}));
+  m.position.set(x,1.4,z); m.rotation.x=-Math.PI/2;
+  G.root.add(m); G.fx.push({mesh:m,life:0.16,maxLife:0.16,base:0.95,fade:true,grow:true,geo});
+}
+
+/* ── 스폰 ── */
+function spawnBeast(){
+  const cap=4+G.day;
+  if(G.beasts.filter(b=>!b.dead).length>=cap) return;
+  const p=G.player; let x,z,tries=0;
+  do{ x=rnd(-MAP+8,MAP-8); z=rnd(-MAP+8,MAP-8); tries++; }while(dist2(x,z,p.x,p.z)<55&&tries<12);
+  const r=Math.random()+G.day*0.025;
+  const kind=r<0.55?'wolf':r<0.85?'bear':'tiger';
+  const def=BEASTS[kind], vis=makeBeast(kind);
+  vis.g.position.set(x,0,z); G.root.add(vis.g);
+  G.beasts.push({kind,mesh:vis.g,mat:vis.mat,x,z,hp:def.hp,max:def.hp,r:def.r,
+    hurt:0,dead:false,atkT:0});
+}
+
+/* ════════════════════════════════════════════════════════════
+   업데이트
+   ════════════════════════════════════════════════════════════ */
+function update(dt){
+  const p=G.player;
+
+  // 방향키로 시점 회전 (마우스 잠금이 안 되는 환경 대비)
+  const turn=2.4;
+  if(keys['arrowleft'])  yaw+=turn*dt;
+  if(keys['arrowright']) yaw-=turn*dt;
+  if(keys['arrowup'])    pitch=clamp(pitch+turn*dt,-1.3,1.3);
+  if(keys['arrowdown'])  pitch=clamp(pitch-turn*dt,-1.3,1.3);
+
+  // 주야/시간
+  G.phaseT-=dt;
+  if(G.phaseT<=0){
+    if(G.phase==='DAY'){ G.phase='NIGHT'; G.phaseT=PHASE.NIGHT; applyPhase(); pushLog(`밤이 찾아왔다… (Day ${G.day})`); beep(110,.2); }
+    else{
+      G.phase='DAY'; G.phaseT=PHASE.DAY; G.day++;
+      G.beasts.forEach(b=>{ if(Math.random()<0.6){b.dead=true;G.root.remove(b.mesh);} });
+      applyPhase(); pushLog(`Day ${G.day} — 새벽이 밝았다.`);
+      if(G.day>MAX_DAY){ loseGame('10일이 지났지만 탈출하지 못했다.'); return; }
+    }
+    refreshClock();
+  }
+
+  // 이동
+  let mf=0,ms=0;
+  if(keys['w'])mf+=1; if(keys['s'])mf-=1; if(keys['d'])ms+=1; if(keys['a'])ms-=1;
+  const moving=(mf||ms);
+  const run=(keys['shift']||keys['shiftleft']||keys['shiftright'])&&p.stam>0&&moving;
+  const spd=run?14:8;
+  if(run) p.stam=clamp(p.stam-26*dt,0,100); else p.stam=clamp(p.stam+16*dt,0,100);
+  if(moving){
+    const f=fwdHoriz();
+    const rx=-f.z, rz=f.x;                       // 우측 벡터
+    let dx=f.x*mf+rx*ms, dz=f.z*mf+rz*ms;
+    const l=Math.hypot(dx,dz); dx/=l; dz/=l;
+    p.x=clamp(p.x+dx*spd*dt,-MAP+2,MAP-2);
+    p.z=clamp(p.z+dz*spd*dt,-MAP+2,MAP-2);
+    collideBuildings(p);
+  }
+
+  // 타이머
+  if(p.atkTimer>0)p.atkTimer-=dt;
+  if(p.hurt>0)p.hurt-=dt;
+
+  // 배고픔 (5초마다 1 / 달리기 시 3초마다 1)
+  p.hunger=clamp(p.hunger-(run?HUNGER_RUN:HUNGER_NORMAL)*dt,0,100);
+  if(p.hunger<=0){
+    if(p.starve<0){ p.starve=STARVE_LIMIT; pushLog('굶주림! 30초 안에 음식을 먹어라!'); }
+    p.starve-=dt;
+    const sw=document.getElementById('starveWarn');
+    sw.style.display='block'; sw.textContent=`⚠ 아사까지 ${Math.max(0,p.starve).toFixed(0)}초`;
+    if(p.starve<=0){ loseGame('굶주림으로 쓰러졌다.'); return; }
+  }
+
+  // 밤 스폰
+  if(G.phase==='NIGHT'){ G.spawnT-=dt; if(G.spawnT<=0){ spawnBeast(); G.spawnT=rnd(1.6,3.4); } }
+
+  // 맹수 AI (공격 딜레이 2초)
+  for(const m of G.beasts){
+    if(m.dead)continue;
+    const def=BEASTS[m.kind];
+    const dx=p.x-m.x,dz=p.z-m.z,d=Math.hypot(dx,dz)||1;
+    m.x+=dx/d*def.spd*dt; m.z+=dz/d*def.spd*dt;
+    m.mesh.position.set(m.x,0,m.z);
+    m.mesh.rotation.y=Math.atan2(dx,dz);
+    if(m.hurt>0){ m.hurt-=dt; m.mat.emissive&&m.mat.emissive.setHex(0x000000); }
+    m.atkT-=dt;
+    if(d<m.r+p.r+0.6 && m.atkT<=0){
+      let dmg=Math.max(0,def.atk-(p.armor?ARMOR_REDUCE:0));
+      damagePlayer(dmg); m.atkT=BEAST_ATK_CD;
+    }
+  }
+  G.beasts=G.beasts.filter(b=>!b.dead);
+
+  // 보스 AI
+  for(const b of G.bosses){
+    if(b.dead)continue;
+    b.limbT+=dt*4;
+    b.limbs.forEach((pv,i)=>{ pv.rotation.x=Math.sin(b.limbT+i)*0.5; pv.rotation.z=Math.cos(b.limbT+i*1.3)*0.3; });
+    if(b.hurt>0)b.hurt-=dt;
+    const dx=p.x-b.x,dz=p.z-b.z,d=Math.hypot(dx,dz)||1;
+    b.cd-=dt;
+    if(b.state==='roam'){
+      b.t-=dt;
+      if(b.t<=0){ b.t=rnd(1.5,3); b.tx=rnd(-MAP+20,MAP-20); b.tz=rnd(-MAP+20,MAP-20); }
+      if(d<46&&b.cd<=0){ b.state='tele'; b.t=0.6; b.eMat.color.set(0xff5050); }
+      else{
+        const td=dist2(b.x,b.z,b.tx,b.tz)||1;
+        b.x+=(b.tx-b.x)/td*6*dt; b.z+=(b.tz-b.z)/td*6*dt;
+        if(d<80){ b.x+=dx/d*3.5*dt; b.z+=dz/d*3.5*dt; }
+      }
+    }else if(b.state==='tele'){
+      b.t-=dt;
+      if(b.t<=0){ b.cx=dx/d; b.cz=dz/d; b.state='charge'; b.t=0.55; beep(70,.18); }
+    }else if(b.state==='charge'){
+      b.t-=dt;
+      b.x=clamp(b.x+b.cx*34*dt,-MAP+2,MAP-2);
+      b.z=clamp(b.z+b.cz*34*dt,-MAP+2,MAP-2);
+      if(d<b.r+p.r+0.8){ damagePlayer(b.atk); b.state='roam'; b.cd=rnd(3,5); b.t=rnd(1,2); b.eMat.color.set(0xc0392b); b.x-=b.cx*3; b.z-=b.cz*3; }
+      if(b.t<=0){ b.state='roam'; b.cd=rnd(2.5,4.5); b.t=rnd(1,2); b.eMat.color.set(0xc0392b); }
+    }
+    b.mesh.position.set(b.x,0,b.z);
+    b.mesh.rotation.y=Math.atan2(dx,dz);
+  }
+  G.bosses=G.bosses.filter(b=>!b.dead);
+
+  // 이펙트 수명
+  for(const fx of G.fx){ fx.life-=dt;
+    if(fx.fade&&fx.mesh.material) fx.mesh.material.opacity=Math.max(0,fx.life/(fx.maxLife||0.18))*(fx.base||0.7);
+    if(fx.grow){ const k=1-fx.life/(fx.maxLife||0.16); fx.mesh.scale.setScalar(1+k*2.2); }
+    if(fx.life<=0){ G.root.remove(fx.mesh); fx.dead=true; }
+  }
+  G.fx=G.fx.filter(f=>!f.dead);
+
+  // 드롭 회전(시인성)
+  for(const dd of G.drops){ if(!dd.gone) dd.mesh.rotation.y+=dt*2; }
+  G.drops=G.drops.filter(d=>!d.gone);
+
+  // 탈출구 펄스
+  if(G.exit.active){ G.exit.ring.rotation.z+=dt*0.6;
+    G.exit.light.intensity=1.6+Math.sin(performance.now()/300)*0.8; }
+
+  // 카메라/플레이어 메시
+  updateCamera();
+  G.playerMesh.position.set(p.x,0,p.z);
+  G.playerMesh.rotation.y=yaw;
+
+  refreshBars();
+  document.getElementById('timerTxt').textContent=G.phaseT.toFixed(1)+'s';
+}
+
+function collideBuildings(p){
+  const r=p.r;
+  for(const b of G.walls){
+    const minX=b.minX-r,maxX=b.maxX+r,minZ=b.minZ-r,maxZ=b.maxZ+r;
+    if(p.x>minX&&p.x<maxX&&p.z>minZ&&p.z<maxZ){
+      const dL=p.x-minX,dR=maxX-p.x,dT=p.z-minZ,dB=maxZ-p.z;
+      const mn=Math.min(dL,dR,dT,dB);
+      if(mn===dL)p.x=minX; else if(mn===dR)p.x=maxX; else if(mn===dT)p.z=minZ; else p.z=maxZ;
+    }
+  }
+}
+function updateCamera(){
+  const p=G.player;
+  camera.rotation.set(pitch,yaw,0);
+  const eye=new THREE.Vector3(p.x,EYE,p.z);
+  if(view===1){ camera.position.copy(eye); }
+  else{
+    const cp=Math.cos(pitch);
+    const fwd=new THREE.Vector3(-Math.sin(yaw)*cp,Math.sin(pitch),-Math.cos(yaw)*cp);
+    const D=7.5;
+    camera.position.set(eye.x-fwd.x*D, eye.y+1.2-fwd.y*D, eye.z-fwd.z*D);
+    if(camera.position.y<1) camera.position.y=1;
+  }
+}
+function damagePlayer(dmg){
+  if(dmg<=0)return; const p=G.player;
+  p.hp=clamp(p.hp-dmg,0,MAXHP); p.hurt=0.25; flashDamage(); beep(140,.06);
+  if(p.hp<=0) loseGame('맹수에게 목숨을 잃었다.');
+}
+
+/* ── 주야 라이팅 ── */
+function applyPhase(){
+  const night=G.phase==='NIGHT';
+  ambient.intensity=night?0.07:0.55;
+  hemi.intensity=night?0.10:0.55;
+  sun.intensity=night?0.06:0.85;
+  flashlight.intensity=night?2.4:0.0;
+  const fogC=night?0x05060a:0x2a3038;
+  scene.background.setHex(fogC); scene.fog.color.setHex(fogC);
+  scene.fog.near=night?6:40; scene.fog.far=night?62:240;
+  groundMat.color.setHex(night?0x141a12:0x33402f);
+}
+
+/* ════════════════════════════════════════════════════════════
+   HUD
+   ════════════════════════════════════════════════════════════ */
+function setBar(id,v,max){ max=max||100; document.getElementById(id+'Fill').style.transform='scaleX('+clamp(v/max,0,1)+')';
+  document.getElementById(id+'Num').textContent=Math.round(v); }
+function refreshBars(){ const p=G.player; setBar('hp',p.hp,MAXHP); setBar('hunger',p.hunger); setBar('stam',p.stam); }
+function refreshClock(){ document.getElementById('dayTxt').textContent=`DAY ${G.day} / ${MAX_DAY}`;
+  document.getElementById('phaseTxt').textContent=G.phase==='NIGHT'?'밤':'낮';
+  document.getElementById('hud').className=G.phase==='NIGHT'?'nightOn':''; }
+function refreshGear(){
+  const p=G.player; let html='';
+  for(const id of ORDER){ const w=WEAPONS[id],owned=p.owned[id];
+    const cls='slot'+(owned?' has':'')+(p.cur===id?' cur':'');
+    const right=id==='gun'&&owned?`탄 ${p.ammo}`:(owned?'보유':'—');
+    html+=`<div class="${cls}"><span>${w.key}. ${w.name}</span><span>${right}</span></div>`; }
+  html+=`<div class="slot has" style="margin-top:4px"><span>🍖 음식</span><span>${p.food}</span></div>`;
+  document.getElementById('gearList').innerHTML=html;
+  document.getElementById('armorTag').style.display=p.armor?'block':'none';
+}
+function refreshMission(){ const m=G.mission,el=document.getElementById('missionTxt');
+  el.innerHTML=m.label(m.prog)+(G.missionDone?' — <b>완수! EXIT로!</b>':''); el.className=G.missionDone?'done':''; }
+function pushLog(msg){ const log=document.getElementById('log');
+  const d=document.createElement('div'); d.textContent='> '+msg; log.appendChild(d);
+  setTimeout(()=>d.remove(),4700); while(log.children.length>5) log.firstChild.remove(); }
+const flashEl=document.getElementById('dmgFlash');
+function flashDamage(){ flashEl.style.opacity='1'; setTimeout(()=>flashEl.style.opacity='0',90); }
+
+let AC=null;
+function beep(freq,dur){ try{ if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();
+  const o=AC.createOscillator(),g=AC.createGain(); o.type='square'; o.frequency.value=freq;
+  g.gain.value=0.05; o.connect(g); g.connect(AC.destination); o.start();
+  g.gain.exponentialRampToValueAtTime(0.0001,AC.currentTime+dur); o.stop(AC.currentTime+dur);}catch(e){} }
+
+/* ════════════════════════════════════════════════════════════
+   종료/시작
+   ════════════════════════════════════════════════════════════ */
+function loseGame(reason){ G.over=true; running=false; document.exitPointerLock&&document.exitPointerLock();
+  const t=document.getElementById('overTitle'); t.textContent='사 망'; t.className='lose';
+  document.getElementById('overSub').innerHTML=`${reason}<br>버틴 시간: <b>Day ${G.day}</b> · ${G.phase==='NIGHT'?'밤':'낮'}`;
+  document.getElementById('overScreen').classList.remove('hidden');
+  document.getElementById('pause').classList.add('hidden'); beep(80,.5); }
+function winGame(){ G.over=true; G.win=true; running=false; document.exitPointerLock&&document.exitPointerLock();
+  const t=document.getElementById('overTitle'); t.textContent='탈 출 성 공'; t.className='win';
+  document.getElementById('overSub').innerHTML=`<b>Day ${G.day}</b>째, 너는 숲을 빠져나왔다.<br>삼각머리 괴물의 그림자는 더 이상 너를 쫓지 못한다.`;
+  document.getElementById('overScreen').classList.remove('hidden');
+  document.getElementById('pause').classList.add('hidden'); beep(880,.4); }
+
+function startGame(){
+  newGame(); applyPhase();
+  refreshClock(); refreshGear(); refreshMission(); refreshBars();
+  G.playerMesh.visible=(view===3);
+  document.getElementById('viewTxt').textContent='[V] '+(view===1?'1인칭':'3인칭');
+  document.getElementById('startScreen').classList.add('hidden');
+  document.getElementById('overScreen').classList.add('hidden');
+  document.getElementById('pause').classList.add('hidden');
+  document.getElementById('starveWarn').style.display='none';
+  running=true; paused=false; last=performance.now();
+  try{ if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+  updateCamera();
+  try{ cv.requestPointerLock(); }catch(e){}
+}
+
+function loop(now){
+  requestAnimationFrame(loop);
+  if(renderer&&scene&&camera&&G) renderer.render(scene,camera);
+  if(!running||!G||G.over||paused){ last=now; return; }
+  let dt=(now-last)/1000; last=now; if(dt>0.05)dt=0.05;
+  update(dt);
+}
+
+/* ── 부팅 ── */
+initThree(); shared();
+requestAnimationFrame(loop);
+document.getElementById('startBtn').onclick=startGame;
+document.getElementById('retryBtn').onclick=startGame;
+}
+</script>
+</body>
+</html>
